@@ -1,0 +1,14 @@
+{
+    "C_Cpp.default.includePath": [
+        "/home/lss/Desktop/GPH_postgresql/postgresql-12.5/src/include"
+    ],
+    "files.associations": {
+        "cstdlib": "cpp",
+        "stringinfo.h": "c",
+        "functional": "c",
+        "random": "c",
+        "array": "c",
+        "string_view": "c",
+        "algorithm": "c"
+    }
+}

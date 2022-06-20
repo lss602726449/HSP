@@ -1,0 +1,4 @@
+comment = 'Hamming Similarity search in Postgresql'
+default_version = '1.0'
+module_pathname = '$libdir/hsp'
+relocatable = true

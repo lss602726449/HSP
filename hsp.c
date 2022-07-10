@@ -46,12 +46,12 @@ CheckDim(int dim)
 }
 
 static inline void
-CheckExpectedDim(int32 typmod, int dim)
+CheckExpectedDim(int32 typmod, int len)
 {
-	if (typmod != -1 && typmod != dim)
+	if (typmod != -1 && (typmod-1)/WORD_LENGTH + 1 != len)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_EXCEPTION),
-				 errmsg("expected %d dimensions, not %d dimensions", typmod, dim)));
+				 errmsg("expected %d dimensions, so length cannot be %d", typmod, len)));
 }
 
 
@@ -120,8 +120,14 @@ hmcode_in(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_EXCEPTION),
 				 errmsg("hmcode length cannot lowwer than 1")));
-	dim = len*WORD_LENGTH;
-	CheckExpectedDim(typmod, dim);
+
+	CheckExpectedDim(typmod, len);
+
+	if(typmod <= 0){
+		dim = len*WORD_LENGTH;
+	}else{
+		dim = typmod;
+	}
 
 	result = InitHmcode(len, dim);
 	for (i = 0; i < len; i++)
@@ -267,6 +273,21 @@ PrintHmcode(char *msg, hmcode * hmcode)
 	appendStringInfoChar(&buf, '}');
 
 	elog(INFO, "%s = %s", msg, buf.data);
+}
+
+/*
+ * Convert hmcode to hmcode
+ */
+PG_FUNCTION_INFO_V1(hmcode_convert);
+Datum
+hmcode_convert(PG_FUNCTION_ARGS)
+{
+	hmcode	   *arg = PG_GETARG_HMCODE_P(0);
+	int32		typmod = PG_GETARG_INT32(1);
+
+	CheckExpectedDim(typmod, arg->dim);
+
+	PG_RETURN_POINTER(arg);
 }
 
 /*
@@ -682,7 +703,7 @@ get_slots(PG_FUNCTION_ARGS)
 
 	int		 	dim = PG_GETARG_INT32(2);
 	int		 	m = PG_GETARG_INT32(3);
-	int			t = PG_GETARG_INT32(4);
+	int			t = PG_GETARG_INT32(4)+1;
 	int 		b = ceil((double)dim/m);
 	
 	ArrayType  *at;
@@ -760,7 +781,7 @@ get_slots(PG_FUNCTION_ARGS)
 	part = max_error * bucketsize;
 	for (int dst = 0; dst <= t; dst++) {
 		// elog(INFO, " cumulativecost %d ", (int)cumulativecost);
-		cumulativecost += search(hist+0*part, query_arr[0], valuemask, max_error, dst);
+		cumulativecost += search(hist+0*part, query_arr[0], valuemask, max_error, dst-1);
 		DistCost[0][dst] = cumulativecost;
 		DistPath[0][dst] = dst;
 	}
@@ -772,7 +793,7 @@ get_slots(PG_FUNCTION_ARGS)
 			DistCost[pid][dst] = DistCost[pid-1][dst] + search(hist+pid*part, query_arr[pid], valuemask, max_error, 0);
 			DistPath[pid][dst] = 0;
 			for (int err = 1; err <= t && dst - err >=0; err ++) {
-				cumulativecost +=  search(hist+pid*part, query_arr[pid], valuemask, max_error, err);
+				cumulativecost +=  search(hist+pid*part, query_arr[pid], valuemask, max_error, err-1);
 				int current_cost = DistCost[pid-1][dst-err] + cumulativecost;
 				if (DistCost[pid][dst] > current_cost) {
 					DistCost[pid][dst] = current_cost;
@@ -787,7 +808,7 @@ get_slots(PG_FUNCTION_ARGS)
 	
 	err = t ;
 	for (pid = m - 1; pid >= 0; --pid) {
-		slots[pid] = DistPath[pid][err];
+		slots[pid] = DistPath[pid][err]-1;
 		err = err - DistPath[pid][err];
 	}
 

@@ -29,6 +29,8 @@ CREATE TYPE hmcode (
 	SEND      = hmcode_send
 );
 -- function
+CREATE FUNCTION hmcode_convert(hmcode, integer, boolean) RETURNS hmcode
+	AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT;
 
 CREATE FUNCTION array_to_hmcode(integer[], integer) RETURNS hmcode
 	AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT;
@@ -348,7 +350,8 @@ start_time timestamp;
 end_time timestamp;
 start_t timestamp;
 end_t timestamp;
-cand_size bigint; 
+cand_size bigint;
+total integer; 
 BEGIN
 
 -- start_t = clock_timestamp(); 
@@ -357,6 +360,7 @@ SELECT get_hmcode_dim(query) INTO dim; --dimension of the query
 s = 0; -- serach radis
 count = 0; -- search result
 cand_size = 1; -- initial by s=0, only itself
+SELECT get_total() INTO total;
 IF k > total THEN
 	k = total;
 END IF;
@@ -406,13 +410,13 @@ WHILE count < thres LOOP
 	cand_size = (cand_size * (curb-s))/(s+1);
    	s = s + 1; 
 END LOOP;
--- SELECT ARRAY(SELECT DISTINCT UNNEST(res)) INTO res;
+SELECT ARRAY(SELECT DISTINCT UNNEST(res)) INTO res;
 -- end_t = clock_timestamp(); 
 -- RAISE NOTICE 'time of search = %',age(end_t, start_t);
-RETURN QUERY EXECUTE format('SELECT distinct on (id) *
+RETURN QUERY EXECUTE format('SELECT *
 FROM %s as t
 WHERE t.id = ANY($2) 
-ORDER BY hamming_distance(%s, $1) LIMIT $3 ',pg_typeof(_tbl_type),clomnname)
+ORDER BY hamming_distance(%s, $1),id LIMIT $3 ',pg_typeof(_tbl_type),clomnname)
 using query,res,k;
 END
 $$
@@ -510,7 +514,7 @@ $$
 LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION search_thres_MIH(query hmcode, _tbl_type anyelement, clomnname varchar, t integer) RETURNS SETOF anyelement AS $$
+CREATE OR REPLACE FUNCTION search_thres_mih(query hmcode, _tbl_type anyelement, clomnname varchar, t integer) RETURNS SETOF anyelement AS $$
 DECLARE
 m integer;
 count integer;
@@ -549,8 +553,13 @@ mplus = dim - m * (b-1);
 -- select get_slots((SELECT * FROM hist), query_arr, dim, m, t) INTO slots;
 -- end_time = clock_timestamp();
 -- RAISE NOTICE 'time of get dis = %',age(end_time, start_time);
-FOR I IN array_lower(slots, 1)..array_upper(slots, 1) LOOP
-	RAISE NOTICE 'the th % part = %', I , slots[I];
+FOR I IN 1 ..m LOOP
+	IF I <= t%m  THEN
+		slots[I] = t/m+1;
+	ELSE
+		slots[I] = t/m;
+	END IF;
+	-- RAISE NOTICE '%', slots[I];
 END LOOP;
 FOR i IN 1..m LOOP
 	IF slots[i] = -1 THEN
@@ -619,7 +628,6 @@ $$
 LANGUAGE plpgsql;
 
 -- default parameter 
-
 SELECT set_m(3);
 SELECT set_pv_num(1000);
 SELECT set_histgramrate(100);

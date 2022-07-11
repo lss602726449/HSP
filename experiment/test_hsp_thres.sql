@@ -1,10 +1,4 @@
-CREATE EXTENSION bktree;
-
-CREATE TABLE  test_bktree(id SERIAL PRIMARY KEY, val bigint);
-
-CREATE INDEX bk_index_name ON test_bktree USING spgist (val bktree_ops);
-
-INSERT INTO test_bktree(val) SELECT (random()*(pow(2,64)-1))::bigint from generate_series(1,100);
+-- INSERT INTO test_bktree(val) SELECT (random()*(pow(2,64)-1))::bigint from generate_series(1,100);
 
 CREATE EXTENSION hsp;
 
@@ -16,6 +10,22 @@ CREATE OR REPLACE FUNCTION gen_uint8_arr(int) RETURNS int[] as $$
     SELECT array_agg((random()*255)::int4) from generate_series(1,$1);  
 $$ LANGUAGE SQL STRICT ;  
 
+-- INSERT INTO test_hsp(val) SELECT gen_uint8_arr(8) FROM generate_series(1,1000000);
+
+SELECT set_m(3);
+
+SELECT create_index('test_hsp', 'val');
+
+SELECT * from test_hsp where hamming_distance('{189,37,240,18,159,201,172,87}',val)<=4;
+
+SELECT *
+FROM test_hsp as t
+WHERE t.id in (SELECT (random()*100000)::int from generate_series(1,1000));
+
+
+CREATE EXTENSION bktree;
+
+CREATE TABLE  test_bktree(id SERIAL PRIMARY KEY, val bigint);
 
 CREATE OR REPLACE FUNCTION gen_64(nums int[]) RETURNS bigint as $$  
 DECLARE
@@ -31,23 +41,17 @@ END
 $$
 LANGUAGE plpgsql;
 
-CREATE TABLE  test_bktree(id SERIAL PRIMARY KEY, val bigint);
-
 INSERT INTO test_bktree select id, gen_64(val::int[]) from test_hsp;
 
 CREATE INDEX bk_index_name ON test_bktree USING spgist (val bktree_ops);
 
 
-
-
-
-INSERT INTO test_hsp(val) SELECT gen_uint8_arr(8) FROM generate_series(1,1000000);
-
-SELECT set_m(3);
-
-SELECT create_index('test_hsp', 'val');
-
 -- SELECT * FROM test_bktree WHERE val <@ (0, 10);
+
+
+SELECT * FROM test_bktree WHERE val <@ (6814781905043772971, 4);
+
+SELECT * from search_thres('{189,37,240,18,159,201,172,87}', NULL::test_hsp, 'val',4);
 
 CREATE OR REPLACE FUNCTION test(num int, r int) RETURNS void as $$  
 DECLARE
@@ -55,14 +59,17 @@ start_time timestamp;
 end_time timestamp;
 bf_time interval;
 thres_time interval;
+mih_time interval;
 bktree_time interval;
 query hmcode;
 divide float;
 temp bigint;
+rand integer;
 BEGIN
     bf_time = '0 second';
     thres_time = '0 second';
     bktree_time = '0 second';
+	mih_time = '0 second';
     -- RAISE NOTICE 'bf_time: %',bf_time;
     -- RAISE NOTICE 'thres_time: %',thres_time;
     start_time = clock_timestamp(); 
@@ -70,16 +77,20 @@ BEGIN
     end_time = clock_timestamp();
     bf_time = bf_time + age(end_time,start_time);
     FOR I IN 1..num LOOP
-        EXECUTE format('SELECT val from test_hsp WHERE id = $1 ')using I into query;
+		rand = random()*1000000;
+        EXECUTE format('SELECT val from test_hsp WHERE id = $1 ')using rand into query;
+
+		start_time = clock_timestamp();
+        EXECUTE format('SELECT * from search_thres_mih($1, NULL::test_hsp, $2, $3)') using query, 'val', r;
+        end_time = clock_timestamp();
+        mih_time = mih_time + age(end_time,start_time);
 
         start_time = clock_timestamp();
         EXECUTE format('SELECT * from search_thres($1, NULL::test_hsp, $2, $3)') using query, 'val', r;
         end_time = clock_timestamp();
         thres_time = thres_time + age(end_time,start_time);
 
-        EXECUTE format('SELECT val from test_bktree WHERE id = $1 ')using I into temp;
-        -- temp = random()*(pow(2,63)-1);
-
+        EXECUTE format('SELECT val from test_bktree WHERE id = $1 ')using rand into temp;
         start_time = clock_timestamp();
         EXECUTE format('SELECT * FROM test_bktree WHERE val <@ ($1, $2);') using temp,r;
         end_time = clock_timestamp();
@@ -88,9 +99,11 @@ BEGIN
     divide = num;
     bf_time = bf_time;
     thres_time = thres_time/divide;
+	mih_time = mih_time/divide;
     bktree_time = bktree_time/divide;
     RAISE NOTICE 'bf_time: %',bf_time;
     RAISE NOTICE 'thres_time: %',thres_time;
+	RAISE NOTICE 'mih_time: %',mih_time;
     RAISE NOTICE 'bktree_time: %',bktree_time;
 END
 $$
@@ -102,7 +115,7 @@ DECLARE
 BEGIN
     FOR I IN 1..array_upper(thres, 1) LOOP
         RAISE NOTICE 'r: %', thres[I];
-        PERFORM test(100,I);
+        PERFORM test(1000,I);
     END LOOP; 
 END
 $$
@@ -328,14 +341,25 @@ END
 $$
 LANGUAGE plpgsql;
 
-SELECT * from test_hsp where hamming_distance('{189,37,240,18,159,201,172,87}',val)<=4;
-
-SELECT *
-FROM test_hsp as t
-WHERE t.id in (SELECT (random()*100000)::int from generate_series(1,1000));
-
-SELECT * FROM test_bktree WHERE val <@ (6814781905043772971, 4);
-
-SELECT * from search_thres('{189,37,240,18,159,201,172,87}', NULL::test_hsp, 'val',4); 
+ 
 
 
+
+
+CREATE OR REPLACE FUNCTION test_array() RETURNS void as $$  
+DECLARE
+temp int[];
+m int;
+BEGIN
+	m=3;
+	RAISE NOTICE '%', array_length(temp,1);
+	FOR I IN 1 ..m LOOP
+		temp[I] = 1;
+	END LOOP;
+	RAISE NOTICE '%', array_length(temp,1);
+	FOR I IN 1 ..m LOOP
+		RAISE NOTICE '%', temp[I];
+	END LOOP;
+END
+$$
+LANGUAGE plpgsql;

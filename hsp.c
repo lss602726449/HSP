@@ -48,7 +48,7 @@ CheckDim(int dim)
 static inline void
 CheckExpectedDim(int32 typmod, int len)
 {
-	if (typmod != -1 && (typmod-1)/WORD_LENGTH + 1 != len)
+	if (typmod != -1 && typmod/WORD_LENGTH != len)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_EXCEPTION),
 				 errmsg("expected %d dimensions, so length cannot be %d", typmod, len)));
@@ -285,7 +285,7 @@ hmcode_convert(PG_FUNCTION_ARGS)
 	hmcode	   *arg = PG_GETARG_HMCODE_P(0);
 	int32		typmod = PG_GETARG_INT32(1);
 
-	CheckExpectedDim(typmod, arg->dim);
+	CheckExpectedDim(typmod, arg->len);
 
 	PG_RETURN_POINTER(arg);
 }

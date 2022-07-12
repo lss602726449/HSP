@@ -9,6 +9,7 @@
         "random": "c",
         "array": "c",
         "string_view": "c",
-        "algorithm": "c"
+        "algorithm": "c",
+        "limits": "c"
     }
 }

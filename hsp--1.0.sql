@@ -123,6 +123,9 @@ CREATE OR REPLACE FUNCTION get_statistics_array(bigint[], integer, integer) RETU
 CREATE OR REPLACE FUNCTION get_slots(integer[], bigint[], integer, integer, integer) RETURNS integer[]
 	AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION get_greedy(integer[], bigint[], integer, integer) RETURNS integer[]
+	AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT;
+
 CREATE OR REPLACE FUNCTION set_m(m integer) RETURNS void AS $$
 BEGIN
 EXECUTE format('CREATE OR REPLACE FUNCTION get_m() RETURNS integer AS ''SELECT %s'' LANGUAGE sql IMMUTABLE', m);
@@ -332,6 +335,117 @@ LANGUAGE plpgsql;
 
 
 CREATE OR REPLACE FUNCTION search_knn(query hmcode, _tbl_type anyelement, clomnname varchar, k int4) RETURNS SETOF anyelement AS $$
+DECLARE
+m integer;
+count integer;
+s integer ;
+query_arr bigint[];
+dim integer;
+query_temp bigint[];
+mplus integer;
+b integer;
+curb integer;
+res integer[];
+res_temp integer[];
+thres integer;
+alpha float;
+start_time timestamp;
+end_time timestamp;
+start_t timestamp;
+end_t timestamp;
+start_t2 timestamp;
+end_t2 timestamp;
+cand_size bigint;
+total integer;
+greedy integer[];
+slots integer[];
+BEGIN
+
+start_t = clock_timestamp();
+SELECT get_m() INTO m;
+SELECT get_hmcode_dim(query) INTO dim; --dimension of the query
+count = 0; -- search result
+cand_size = 1; -- initial by s=0, only itself
+SELECT get_total() INTO total;
+IF k > total THEN
+	k = total;
+END IF;
+SELECT hmcode_split(query,m) INTO query_arr;
+SELECT ceil(dim::float4/m) INTO b;
+mplus = dim - m * (b-1);
+SELECT get_pv_num() INTO thres;
+
+select get_greedy((SELECT * FROM hist), query_arr, dim, m) INTO greedy;
+FOR I IN 1 ..m LOOP
+	slots[I] = 0;
+END LOOP;
+
+-- RAISE NOTICE 'thres = %',thres;
+-- RAISE NOTICE 'm = %',m;
+-- RAISE NOTICE 'b = %',b;
+WHILE count < thres LOOP
+	-- RAISE NOTICE 's = %',s;
+	-- RAISE NOTICE 'count= %',count;
+	-- start_t2 = clock_timestamp(); 
+   	FOR I IN 1..array_upper(greedy,1) LOOP
+		i = greedy[I];
+		s = slots[i];
+		slots[i] = slots[i]+1;
+		RAISE NOTICE '%',i;
+		RAISE NOTICE '%',s;
+		IF i <= mplus THEN
+			curb = b;
+		ELSE
+			curb = b-1;
+		END IF; 
+		IF s <= curb THEN
+			IF cand_size<total THEN
+				-- start_time = clock_timestamp();
+				-- SELECT get_query_cand(query_arr[i],curb,s) INTO query_temp;
+				-- end_time = clock_timestamp();
+				-- RAISE NOTICE 'time of candidate generation = %',age(end_time, start_time);
+				EXECUTE format('SELECT array_agg(hi.id) 
+				FROM hm_index%s as hi 
+				WHERE hi.code = ANY(get_query_cand($1,$2,$3)::uint4[])',i) INTO res_temp using query_arr[i],curb,s;
+				-- end_time = clock_timestamp();
+				-- RAISE NOTICE 'time of get res = %',age(end_time, start_time);
+			--ELSE
+				--RAISE EXCEPTION 'The enumerate number exceed the number of total number of the databse, please use the brutefoce algorithm'; 
+			END IF;
+			IF count < k THEN 
+				SELECT ARRAY(SELECT DISTINCT UNNEST(array_cat(res,res_temp))) INTO res;--remove duplicate
+			ELSE
+				-- start_time = clock_timestamp();
+				res = array_cat(res,res_temp);
+				-- end_time = clock_timestamp();
+				-- RAISE NOTICE 'time of only concatenate = %',age(end_time, start_time);
+			END IF;
+			count = coalesce(array_upper(res, 1),0);
+			-- RAISE NOTICE 'count= %',count;
+		ELSE
+			RAISE EXCEPTION 'search radis equal partition length'; 
+
+		END IF;
+		cand_size = (cand_size * (curb-s))/(s+1);
+		EXIT WHEN count >= thres;
+   	END LOOP;
+	-- end_t2 = clock_timestamp(); 
+	-- RAISE NOTICE 'time of search = %',age(end_t2, start_t2);
+END LOOP;
+-- SELECT ARRAY(SELECT DISTINCT UNNEST(res)) INTO res;
+end_t = clock_timestamp(); 
+RAISE NOTICE 'time of search = %',age(end_t, start_t);
+RAISE NOTICE 'count = %', array_upper(res, 1);
+RETURN QUERY EXECUTE format('SELECT *
+FROM %s as t
+WHERE t.id in (SELECT DISTINCT UNNEST($2)) 
+ORDER BY hamming_distance(%s, $1) LIMIT $3 ',pg_typeof(_tbl_type),clomnname)
+using query,res,k;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION search_knn_mih(query hmcode, _tbl_type anyelement, clomnname varchar, k int4) RETURNS SETOF anyelement AS $$
 DECLARE
 m integer;
 count integer;

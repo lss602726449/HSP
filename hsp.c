@@ -828,3 +828,110 @@ get_slots(PG_FUNCTION_ARGS)
 	at = construct_array(d, m, INT4OID, sizeof(int), true, 'i');
 	PG_RETURN_POINTER(at);
 }
+
+PG_FUNCTION_INFO_V1(get_greedy);
+Datum
+get_greedy(PG_FUNCTION_ARGS)
+{
+	ArrayType  *array;
+	int16		typlen;
+	bool		typbyval;
+	char		typalign;
+	Datum	   *elemsp;
+	bool	   *nullsp;
+	int			nelemsp;
+
+	int		 	dim = PG_GETARG_INT32(2);
+	int		 	m = PG_GETARG_INT32(3);
+	int			t = m * MAX_ERROR;
+	int 		b = ceil((double)dim/m);
+	
+	ArrayType  *at;
+	Datum	   *d;
+	uint32 bucketsize;
+	uint32 valuemask;
+	int length;
+	int* hist;
+
+	int* greedy;
+	int* allo;
+	int part;
+
+	// read the hist array
+	int max_error, max_bit;
+	if (b > MAX_BUCKET) {
+		max_bit = MAX_BUCKET;
+	}else{
+		max_bit = b;
+	}
+	
+	bucketsize = pow(2, max_bit);
+	
+	valuemask = bucketsize-1;
+	if (b > MAX_ERROR) {
+		max_error = MAX_ERROR;
+	} else {
+		max_error = b;
+	}
+	
+	length = m * max_error * bucketsize;
+	
+	array = PG_GETARG_ARRAYTYPE_P(0);
+	hist = (int*)palloc(length * sizeof(int32));
+	if (ARR_NDIM(array) > 1)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_EXCEPTION),
+				 errmsg("array must be 1-D")));
+
+	get_typlenbyvalalign(ARR_ELEMTYPE(array), &typlen, &typbyval, &typalign);
+	deconstruct_array(array, ARR_ELEMTYPE(array), typlen, typbyval, typalign, &elemsp, &nullsp, &nelemsp);
+
+	for (int i = 0; i < nelemsp; i++)
+	{
+		hist[i] = DatumGetInt32(elemsp[i]);
+	}
+	// read the query array
+	array = PG_GETARG_ARRAYTYPE_P(1);
+	if (ARR_NDIM(array) > 1)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_EXCEPTION),
+				 errmsg("array must be 1-D")));
+
+	get_typlenbyvalalign(ARR_ELEMTYPE(array), &typlen, &typbyval, &typalign);
+	deconstruct_array(array, ARR_ELEMTYPE(array), typlen, typbyval, typalign, &elemsp, &nullsp, &nelemsp);
+	uint32* query_arr = (uint32*)palloc(m * sizeof(uint32));
+	for (int i = 0; i < nelemsp; i++)
+	{
+		query_arr[i] = (uint32)DatumGetInt64(elemsp[i]);
+	}
+
+	greedy = (int*)palloc(t*sizeof(int*));
+	allo = (int*)palloc(m*sizeof(int*));
+
+	for(int i=0; i<m; i++){
+		allo[i] = 0;
+	}
+	
+	part = max_error * bucketsize;
+	for(int pid = 0; pid<t; pid++){
+		int min_value = MAX_COUNT+1;
+		int temp = 0;
+		for(int i=0; i<m; i++){
+			int cost = search(hist+i*part, query_arr[i], valuemask, max_error, allo[i]);
+			if(cost < min_value){
+				temp = i;
+				min_value = cost;
+			}
+		}
+		greedy[pid] = temp+1;
+		allo[temp]++;
+	}
+
+	d = palloc(t * sizeof(Datum));
+	for (int i = 0; i < m; i++){
+		// elog(INFO, " slot %d %d", i, slots[i]);
+		d[i] = Int32GetDatum(greedy[i]);
+	}
+	at = construct_array(d, m, INT4OID, sizeof(int), true, 'i');
+	PG_RETURN_POINTER(at);
+}

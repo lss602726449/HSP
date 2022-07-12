@@ -3,8 +3,8 @@
 //Constants
 #define uint64_1 ((uint64)0x01)
 #define uint32_1 ((uint32)0x01)
-#define MAX_BUCKET 10
-#define MAX_ERROR  5
+#define MAX_BUCKET 12
+#define MAX_ERROR  6
 #define MAX_COUNT 1024*1024*128
 
 //Function

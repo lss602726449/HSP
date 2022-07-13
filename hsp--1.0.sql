@@ -359,6 +359,7 @@ cand_size bigint;
 total integer;
 greedy integer[];
 slots integer[];
+i integer;
 BEGIN
 
 start_t = clock_timestamp();
@@ -383,35 +384,32 @@ END LOOP;
 -- RAISE NOTICE 'thres = %',thres;
 -- RAISE NOTICE 'm = %',m;
 -- RAISE NOTICE 'b = %',b;
-WHILE count < thres LOOP
 	-- RAISE NOTICE 's = %',s;
 	-- RAISE NOTICE 'count= %',count;
 	-- start_t2 = clock_timestamp(); 
-   	FOR I IN 1..array_upper(greedy,1) LOOP
-		i = greedy[I];
+   	FOR j IN 1..array_upper(greedy,1) LOOP
+		i = greedy[j];
 		s = slots[i];
 		slots[i] = slots[i]+1;
-		RAISE NOTICE '%',i;
-		RAISE NOTICE '%',s;
+		-- RAISE NOTICE '%',i;
+		-- RAISE NOTICE '%',s;
+		-- RAISE NOTICE '%',array_upper(greedy,1);
 		IF i <= mplus THEN
 			curb = b;
 		ELSE
 			curb = b-1;
 		END IF; 
 		IF s <= curb THEN
-			IF cand_size<total THEN
-				-- start_time = clock_timestamp();
-				-- SELECT get_query_cand(query_arr[i],curb,s) INTO query_temp;
-				-- end_time = clock_timestamp();
-				-- RAISE NOTICE 'time of candidate generation = %',age(end_time, start_time);
-				EXECUTE format('SELECT array_agg(hi.id) 
-				FROM hm_index%s as hi 
-				WHERE hi.code = ANY(get_query_cand($1,$2,$3)::uint4[])',i) INTO res_temp using query_arr[i],curb,s;
-				-- end_time = clock_timestamp();
-				-- RAISE NOTICE 'time of get res = %',age(end_time, start_time);
-			--ELSE
-				--RAISE EXCEPTION 'The enumerate number exceed the number of total number of the databse, please use the brutefoce algorithm'; 
-			END IF;
+			-- start_time = clock_timestamp();
+			-- SELECT get_query_cand(query_arr[i],curb,s) INTO query_temp;
+			-- end_time = clock_timestamp();
+			-- RAISE NOTICE 'time of candidate generation = %',age(end_time, start_time);
+			EXECUTE format('SELECT array_agg(hi.id) 
+			FROM hm_index%s as hi 
+			WHERE hi.code = ANY(get_query_cand($1,$2,$3)::uint4[])',i) INTO res_temp using query_arr[i],curb,s;
+			-- end_time = clock_timestamp();
+			-- RAISE NOTICE 'time of get res = %',age(end_time, start_time);
+			--RAISE EXCEPTION 'The enumerate number exceed the number of total number of the databse, please use the brutefoce algorithm'; 
 			IF count < k THEN 
 				SELECT ARRAY(SELECT DISTINCT UNNEST(array_cat(res,res_temp))) INTO res;--remove duplicate
 			ELSE
@@ -426,16 +424,14 @@ WHILE count < thres LOOP
 			RAISE EXCEPTION 'search radis equal partition length'; 
 
 		END IF;
-		cand_size = (cand_size * (curb-s))/(s+1);
 		EXIT WHEN count >= thres;
    	END LOOP;
 	-- end_t2 = clock_timestamp(); 
 	-- RAISE NOTICE 'time of search = %',age(end_t2, start_t2);
-END LOOP;
 -- SELECT ARRAY(SELECT DISTINCT UNNEST(res)) INTO res;
 end_t = clock_timestamp(); 
-RAISE NOTICE 'time of search = %',age(end_t, start_t);
-RAISE NOTICE 'count = %', array_upper(res, 1);
+-- RAISE NOTICE 'time of search = %',age(end_t, start_t);
+-- RAISE NOTICE 'count = %', array_upper(res, 1);
 RETURN QUERY EXECUTE format('SELECT *
 FROM %s as t
 WHERE t.id in (SELECT DISTINCT UNNEST($2)) 

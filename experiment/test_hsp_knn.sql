@@ -55,25 +55,57 @@ SELECT id, hamming_distance(val, '{12,47,195,146,74,59,9,97}') AS dis from test_
 
 SELECT *, hamming_distance(val, '{12,47,195,146,74,59,9,97}') AS dis  from search_knn('{12,47,195,146,74,59,9,97}', NULL::test_hsp, 'val', 10) ORDER BY dis; 
 
-CREATE OR REPLACE FUNCTION test(num int, k int) RETURNS void as $$  
+SELECT *, hamming_distance(val, '{12,47,195,146,74,59,9,97}') AS dis  from search_knn_mih('{12,47,195,146,74,59,9,97}', NULL::test_hsp, 'val', 10) ORDER BY dis; 
+
+
+CREATE EXTENSION bktree;
+
+CREATE TABLE  test_bktree(id SERIAL PRIMARY KEY, val bigint);
+
+CREATE OR REPLACE FUNCTION gen_64(nums int[]) RETURNS bigint as $$  
+DECLARE
+temp bigint;
+BEGIN
+	temp = 0;
+    FOR I IN 1..(array_upper(nums, 1)-1) LOOP
+        temp = temp*256 + nums[I];
+    END LOOP;
+	temp = temp*128 + (nums[array_upper(nums, 1)]/2);
+RETURN temp;
+END
+$$
+LANGUAGE plpgsql;
+
+INSERT INTO test_bktree select id, gen_64(val::int[]) from test_hsp;
+
+CREATE INDEX bk_index_name ON test_bktree USING spgist (val bktree_ops);
+
+
+CREATE OR REPLACE FUNCTION test_knn(query_arr int[], k int) RETURNS void as $$  
 DECLARE
 recall float;
+recall_mih float;
 start_time timestamp;
 end_time timestamp;
 bf_time interval;
 knn_time interval;
+knn_mih_time interval;
 query hmcode;
 temp integer;
 divide float;
 rand integer;
+num integer;
 BEGIN
     recall = 0;
+    recall_mih = 0;
     bf_time = '0 second';
     knn_time = '0 second';
+    knn_mih_time = '0 second';
+    num = array_upper(query_arr, 1);
     -- RAISE NOTICE 'bf_time: %',bf_time;
     -- RAISE NOTICE 'knn_time: %',knn_time;
-    FOR I IN 1..num LOOP
-        rand = random()*1000000;
+    FOR I IN 1..array_upper(query_arr, 1) LOOP
+        rand = query_arr[I];
         EXECUTE format('SELECT val from test_hsp WHERE id = $1 ')using rand into query;
         
         start_time = clock_timestamp(); 
@@ -83,17 +115,21 @@ BEGIN
         EXECUTE format('CREATE TABLE gt AS SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
         
         start_time = clock_timestamp();
-        EXECUTE format('SELECT temp.* , hamming_distance(val, $2) AS dis  from search_knn($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
+        EXECUTE format('SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn_mih($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
+        end_time = clock_timestamp();
+        knn_mih_time = knn_mih_time + age(end_time,start_time);
+        EXECUTE format('CREATE TABLE test_mih AS SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn_mih($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
+
+        start_time = clock_timestamp();
+        EXECUTE format('SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
         end_time = clock_timestamp();
         knn_time = knn_time + age(end_time,start_time);
-        EXECUTE format('CREATE TABLE test AS SELECT temp.* , hamming_distance(val, $2) AS dis  from search_knn($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
+        EXECUTE format('CREATE TABLE test AS SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
         
         SELECT count(*) 
         FROM test 
         WHERE test.dis < (SELECT max(dis) from gt) INTO temp;
-
         recall = recall + temp;
-
         SELECT  CASE WHEN foo1.count>foo2.count THEN foo2.count
                     ELSE foo1.count
                 END
@@ -104,32 +140,104 @@ BEGIN
         (SELECT count(*) 
         FROM gt 
         WHERE gt.dis = (SELECT max(dis) from gt)) as foo2 INTO temp;
-
         recall = recall + temp;
+
+        SELECT count(*) 
+        FROM test_mih 
+        WHERE test_mih.dis < (SELECT max(dis) from gt) INTO temp;
+        recall_mih = recall_mih + temp;
+        SELECT  CASE WHEN foo1.count>foo2.count THEN foo2.count
+                    ELSE foo1.count
+                END
+        FROM
+        (SELECT count(*) 
+        FROM test_mih 
+        WHERE test_mih.dis = (SELECT max(dis) from gt)) as foo1,
+        (SELECT count(*) 
+        FROM gt 
+        WHERE gt.dis = (SELECT max(dis) from gt)) as foo2 INTO temp;
+        recall_mih = recall_mih + temp;
         
         drop table gt;
         drop table test;
+        drop table test_mih;
     END LOOP;  
     recall = recall/num/k;
+    recall_mih = recall_mih/num/k;
     divide = num;
     bf_time = bf_time/divide;
     knn_time = knn_time/divide;
+    knn_mih_time = knn_mih_time/divide;
     RAISE NOTICE 'bf_time: %',bf_time;
     RAISE NOTICE 'knn_time: %',knn_time;
+    RAISE NOTICE 'knn_mih_time: %',knn_mih_time;
     RAISE NOTICE 'recall: %',recall;
+    RAISE NOTICE 'recall_mih: %',recall_mih;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION test_bktree(query_arr int[],thres int[], k int) RETURNS void as $$
+DECLARE
+start_time timestamp;
+end_time timestamp;
+recall float;
+bktree_time interval;
+pre interval;
+num int;
+cnt int;
+temp bigint;
+BEGIN
+    pre = '0 second';
+    num = array_upper(query_arr,1);
+    recall = 0;
+    FOR I IN 1..array_upper(thres, 1) LOOP
+        bktree_time = '0 second';
+        recall = 0;
+        RAISE NOTICE 'thres: %',thres[I];
+        FOR J IN 1..array_upper(query_arr, 1) LOOP
+            EXECUTE format('SELECT val from test_bktree WHERE id = $1 ')using query_arr[J] into temp;
+            start_time = clock_timestamp();
+            EXECUTE format('SELECT * FROM test_bktree WHERE val <@ ($1, $2);') using temp,thres[I];
+            end_time = clock_timestamp();
+            bktree_time = bktree_time + age(end_time,start_time);
+            EXECUTE format('SELECT count(*) FROM test_bktree WHERE val <@ ($1, $2);') using temp,thres[I] INTO cnt;
+            IF cnt <= k THEN
+                recall = recall + cnt;
+            ELSE
+                recall = recall + k;
+            END IF;
+        END LOOP;
+        -- RAISE NOTICE 'recall %',recall;
+        -- RAISE NOTICE 'num %',num;
+        -- RAISE NOTICE 'k %',k;
+        recall = recall/num/k;
+        bktree_time = pre + bktree_time/num;
+        pre = bktree_time;
+        RAISE NOTICE 'recall: %',recall;
+        RAISE NOTICE 'bktree_time: %',bktree_time;
+    END LOOP;
 END
 $$
 LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION test() RETURNS void as $$  
 DECLARE
-    pv_num float[] := '{10, 50, 100, 200, 500, 1000, 2000, 5000, 8000, 10000}';
+    pv_num float[] := '{10, 50, 100, 200, 500, 1000, 2000, 5000, 10000}';
+    thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10,11,12}';
+    query int[];
+    num int;
 BEGIN
+    num = 100;
+    SELECT array_agg((random()*1000000)::int4) from generate_series(1,num) into query;
+
+    PERFORM test_bktree(query,thres,10);
+
     FOR I IN 1..array_upper(pv_num, 1) LOOP
         PERFORM set_pv_num(pv_num[I]);
         RAISE NOTICE 'pv_num: %', pv_num[I];
-        PERFORM test(100,10);
-    END LOOP; 
+        PERFORM test_knn(query,10);
+    END LOOP;
 END
 $$
 LANGUAGE plpgsql;

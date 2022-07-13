@@ -928,10 +928,10 @@ get_greedy(PG_FUNCTION_ARGS)
 	}
 
 	d = palloc(t * sizeof(Datum));
-	for (int i = 0; i < m; i++){
+	for (int i = 0; i < t; i++){
 		// elog(INFO, " slot %d %d", i, slots[i]);
 		d[i] = Int32GetDatum(greedy[i]);
 	}
-	at = construct_array(d, m, INT4OID, sizeof(int), true, 'i');
+	at = construct_array(d, t, INT4OID, sizeof(int), true, 'i');
 	PG_RETURN_POINTER(at);
 }

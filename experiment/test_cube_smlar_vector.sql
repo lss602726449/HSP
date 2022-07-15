@@ -1,17 +1,11 @@
 -- USE_PGXS=1 make
 -- USE_PGXS=1 make install
 --hmval字段为SimHash，hmarr字段为把SimHash切分为4片的数组
-create extension cube;  
 CREATE TABLE test_cube (id INT, hmval BIT(64), hmarr TEXT[]);
 
 -- create or replace function gen_rand_sig (int, int) returns text as $$  
 --   select string_agg((random()*$1)::int::text,',') from generate_series(1,$2);  
 -- $$ language sql strict;  
-
-CREATE OR REPLACE FUNCTION gen_bit(nums int[]) RETURNS text as $$  
-  select string_agg(foo.unnest::BIT(8)::text,'') from (select unnest(nums)) foo;
-$$
-LANGUAGE sql strict; 
 
 -- CREATE OR REPLACE FUNCTION gen_sig(t text, part int) RETURNS text[] as $$  
 -- DECLARE
@@ -44,21 +38,33 @@ LANGUAGE sql strict;
 -- $$
 -- LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION gen_bit(nums int[]) RETURNS text as $$  
+  select string_agg(foo.unnest::BIT(8)::text,'') from (select unnest(nums)) foo;
+$$
+LANGUAGE sql strict; 
+
+CREATE OR REPLACE FUNCTION add_delim(arr text) RETURNS text as $$  
+  select string_agg(foo.unnest,',') from (select unnest(regexp_split_to_array(arr,''))) foo;
+$$
+LANGUAGE sql strict; 
+
+create extension cube;  
+
 create table test_cube (  
   id int primary key,   -- 主键 
-  sig text    
+  val text    
 );  
 
-insert into test_cube select id, '('||add_delim(sig)||')' from  
-(select id, gen_bit(val::int[]) sig
+insert into test_cube select id, '('||add_delim(val)||')' from  
+(select id, gen_bit(val::int[]) val
 from test_hsp) foo;
 
-create index idx_test_cube on test_cube using gist((sig::cube)); 
+create index idx_test_cube on test_cube using gist((val::cube)); 
 
 select id, pow(dis, 2)::int dis
 from 
-(select id, sig, 
-sig::cube <->   
+(select id, val, 
+val::cube <->   
 '(0,0,0,0,1,1,0,0,0,0,1,0,1,1,1,1,1,1,0,0,0,0,1,1,1,0,0,1,0,0,1,0,0,1,0,0,1,0,1,0,0,0,1,1,1,0,1,1,0,0,0,0,1,0,0,1,0,1,1,0,0,0,0,1)'::cube dis
 from test_cube 
 order by dis
@@ -72,7 +78,7 @@ CREATE TABLE test_vector (id int, val vector(64));
 INSERT INTO test_vector SELECT id, ('['||add_delim(gen_bit(val::int[]))||']')::vector(64)
 from test_hsp; 
 
-CREATE INDEX ON test_vector USING ivfflat (val vector_l2_ops) WITH (lists = 4000);
+CREATE INDEX ON test_vector USING ivfflat (val vector_l2_ops) WITH (lists = 1000);
 
 SET max_parallel_workers_per_gather = 1;
 
@@ -80,6 +86,8 @@ SET ivfflat.probes = 10;
 
 SELECT id, pow(dis,2)::int dis from (SELECT id,val <-> '[0,0,0,0,1,1,0,0,0,0,1,0,1,1,1,1,1,1,0,0,0,0,1,1,1,0,0,1,0,0,1,0,0,1,0,0,1,0,1,0,0,0,1,1,1,0,1,1,0,0,0,0,1,0,0,1,0,1,1,0,0,0,0,1]'::vector(64) dis
 FROM test_vector ORDER BY dis LIMIT 10) foo;
+
+
 
 drop index test_vector_val_idx;
 

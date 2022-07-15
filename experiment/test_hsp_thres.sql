@@ -18,10 +18,6 @@ SELECT create_index('test_hsp', 'val');
 
 SELECT * from test_hsp where hamming_distance('{189,37,240,18,159,201,172,87}',val)<=4;
 
-SELECT *
-FROM test_hsp as t
-WHERE t.id in (SELECT (random()*100000)::int from generate_series(1,1000));
-
 
 CREATE EXTENSION bktree;
 
@@ -46,12 +42,18 @@ INSERT INTO test_bktree select id, gen_64(val::int[]) from test_hsp;
 CREATE INDEX bk_index_name ON test_bktree USING spgist (val bktree_ops);
 
 
--- SELECT * FROM test_bktree WHERE val <@ (0, 10);
-
+SELECT * FROM test_bktree WHERE val <@ (0, 10);
 
 SELECT * FROM test_bktree WHERE val <@ (6814781905043772971, 4);
 
-SELECT * from search_thres('{189,37,240,18,159,201,172,87}', NULL::test_hsp, 'val',4);
+SELECT * from search_thres('{12,47,195,146,74,59,9,97}', NULL::test_hsp, 'val',10);
+
+SELECT * from test_hsp where hamming_distance('{12,47,195,146,74,59,9,97}', val)<=10;
+
+
+SELECT *
+FROM test_hsp as t
+WHERE t.id in (SELECT (random()*100000)::int from generate_series(1,1000));
 
 CREATE OR REPLACE FUNCTION test(num int, r int) RETURNS void as $$  
 DECLARE
@@ -111,11 +113,11 @@ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION test() RETURNS void as $$  
 DECLARE
-    thres  int[] := '{0,1,2,3,4,5,6,7}';
+    thres  int[] := '{0,1,2,3,4,5,6,7,8}';
 BEGIN
     FOR I IN 1..array_upper(thres, 1) LOOP
         RAISE NOTICE 'r: %', thres[I];
-        PERFORM test(1000,I);
+        PERFORM test(500,I);
     END LOOP; 
 END
 $$

@@ -112,19 +112,19 @@ BEGIN
         EXECUTE format('SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
         end_time = clock_timestamp();
         bf_time = bf_time + age(end_time,start_time);
-        EXECUTE format('CREATE TABLE gt AS SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
+        EXECUTE format('CREATE TEMP TABLE gt AS SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
         
         start_time = clock_timestamp();
         EXECUTE format('SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn_mih($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
         end_time = clock_timestamp();
         knn_mih_time = knn_mih_time + age(end_time,start_time);
-        EXECUTE format('CREATE TABLE test_mih AS SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn_mih($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
+        EXECUTE format('CREATE TEMP TABLE test_mih AS SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn_mih($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
 
         start_time = clock_timestamp();
         EXECUTE format('SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
         end_time = clock_timestamp();
         knn_time = knn_time + age(end_time,start_time);
-        EXECUTE format('CREATE TABLE test AS SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
+        EXECUTE format('CREATE TEMP TABLE test AS SELECT temp.id , hamming_distance(val, $2) AS dis  from search_knn($2, NULL::test_hsp, $3, $1) as temp') using k,query,'val';
         
         SELECT count(*) 
         FROM test 
@@ -170,8 +170,8 @@ BEGIN
     knn_mih_time = knn_mih_time/divide;
     RAISE NOTICE 'bf_time: %',bf_time;
     RAISE NOTICE 'knn_time: %',knn_time;
-    RAISE NOTICE 'knn_mih_time: %',knn_mih_time;
     RAISE NOTICE 'recall: %',recall;
+    RAISE NOTICE 'knn_mih_time: %',knn_mih_time;
     RAISE NOTICE 'recall_mih: %',recall_mih;
 END
 $$
@@ -221,23 +221,184 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION test_cube(query_arr int[], k int) RETURNS void as $$
+DECLARE
+start_time timestamp;
+end_time timestamp;
+recall float;
+cube_time interval;
+bf_time interval;
+num int;
+cnt int;
+query_val text;
+query hmcode;
+temp float;
+BEGIN
+    num = array_upper(query_arr,1);
+    recall = 0;
+    cube_time = '0 second';
+    bf_time = '0 second';
+    FOR I IN 1..array_upper(query_arr, 1) LOOP
+        EXECUTE format('SELECT val from test_cube WHERE id = $1 ')using query_arr[I] into query_val;
+        EXECUTE format('SELECT val from test_hsp WHERE id = $1 ')using query_arr[I] into query;
+
+        start_time = clock_timestamp();
+        EXECUTE format('select id,
+            val::cube <-> $1::cube dis
+            from test_cube 
+            order by dis limit 10') using query_val;
+        end_time = clock_timestamp();
+        cube_time = cube_time + age(end_time,start_time);
+
+        EXECUTE format('CREATE TEMP TABLE test AS select id, pow(dis, 2)::int dis from (select id,
+            val::cube <-> $1::cube dis
+            from test_cube 
+            order by dis limit 10) foo') using query_val;
+
+        start_time = clock_timestamp(); 
+        EXECUTE format('SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
+        end_time = clock_timestamp();
+        bf_time = bf_time + age(end_time,start_time);
+
+        EXECUTE format('CREATE TEMP TABLE gt AS SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
+
+
+        SELECT count(*) 
+        FROM test 
+        WHERE test.dis < (SELECT max(dis) from gt) INTO temp;
+        recall = recall + temp;
+        SELECT  CASE WHEN foo1.count>foo2.count THEN foo2.count
+                    ELSE foo1.count
+                END
+        FROM
+        (SELECT count(*) 
+        FROM test 
+        WHERE test.dis = (SELECT max(dis) from gt)) as foo1,
+        (SELECT count(*) 
+        FROM gt 
+        WHERE gt.dis = (SELECT max(dis) from gt)) as foo2 INTO temp;
+        recall = recall + temp;
+
+        drop table test;
+        drop table gt;
+        
+    END LOOP;
+        -- RAISE NOTICE 'recall %',recall;
+        -- RAISE NOTICE 'num %',num;
+        -- RAISE NOTICE 'k %',k;
+        recall = recall/num/k;
+        cube_time = cube_time/num;
+        bf_time = bf_time/num;
+        RAISE NOTICE 'recall: %',recall;
+        RAISE NOTICE 'cube_time: %',cube_time;
+        RAISE NOTICE 'bf_time: %',bf_time;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION test_vector(query_arr int[], probes int[], k int) RETURNS void as $$
+DECLARE
+start_time timestamp;
+end_time timestamp;
+recall float;
+vector_time interval;
+bf_time interval;
+num int;
+cnt int;
+query_val vector;
+query hmcode;
+temp float;
+BEGIN
+    num = array_upper(query_arr,1);
+    FOR I IN 1..array_upper(probes, 1) LOOP
+        recall = 0;
+        vector_time = '0 second';
+        bf_time = '0 second';
+        -- RAISE NOTICE '%', probes[I];
+        EXECUTE format('SET ivfflat.probes = %s', probes[I]);
+        -- RAISE NOTICE '%', probes[I];
+        FOR J IN 1..array_upper(query_arr, 1) LOOP
+            EXECUTE format('SELECT val from test_vector WHERE id = $1 ')using query_arr[J] into query_val;
+            EXECUTE format('SELECT val from test_hsp WHERE id = $1 ')using query_arr[J] into query;
+
+            start_time = clock_timestamp();
+            EXECUTE format('SELECT id, val <-> $1::vector(64) dis
+            FROM test_vector ORDER BY dis LIMIT 10') using query_val;
+            end_time = clock_timestamp();
+            vector_time = vector_time + age(end_time,start_time);
+
+            EXECUTE format('CREATE TEMP TABLE test AS select id, pow(dis, 2)::int dis from (SELECT id, val <-> $1::vector(64) dis
+            FROM test_vector ORDER BY dis LIMIT 10) foo') using query_val;
+
+            start_time = clock_timestamp(); 
+            EXECUTE format('SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
+            end_time = clock_timestamp();
+            bf_time = bf_time + age(end_time,start_time);
+
+            EXECUTE format('CREATE TEMP TABLE gt AS SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
+
+
+            SELECT count(*) 
+            FROM test 
+            WHERE test.dis < (SELECT max(dis) from gt) INTO temp;
+            recall = recall + temp;
+            SELECT  CASE WHEN foo1.count>foo2.count THEN foo2.count
+                        ELSE foo1.count
+                    END
+            FROM
+            (SELECT count(*) 
+            FROM test 
+            WHERE test.dis = (SELECT max(dis) from gt)) as foo1,
+            (SELECT count(*) 
+            FROM gt 
+            WHERE gt.dis = (SELECT max(dis) from gt)) as foo2 INTO temp;
+            recall = recall + temp;
+
+            drop table test;
+            drop table gt;
+            
+        END LOOP;
+            -- RAISE NOTICE 'recall %',recall;
+            -- RAISE NOTICE 'num %',num;
+            -- RAISE NOTICE 'k %',k;
+            RAISE NOTICE 'probes: %',probes[I];
+            recall = recall/num/k;
+            vector_time = vector_time/num;
+            bf_time = bf_time/num;
+            RAISE NOTICE 'recall: %',recall;
+            RAISE NOTICE 'vector_time: %',vector_time;
+            RAISE NOTICE 'bf_time: %',bf_time;
+    END LOOP;
+END
+$$
+LANGUAGE plpgsql;
+
+
 CREATE OR REPLACE FUNCTION test() RETURNS void as $$  
 DECLARE
-    pv_num float[] := '{10, 50, 100, 200, 500, 1000, 2000, 5000, 10000}';
-    thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10,11,12}';
+    pv_num float[] := '{10, 50, 100, 200, 500, 1000, 2000, 3000, 5000}';
+    thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10}';
+    probes  int[] := '{1,5,10,20,50,100,200}';
     query int[];
     num int;
+    k int;
 BEGIN
-    num = 100;
+    num = 500;
+    k = 10;
     SELECT array_agg((random()*1000000)::int4) from generate_series(1,num) into query;
-
-    PERFORM test_bktree(query,thres,10);
 
     FOR I IN 1..array_upper(pv_num, 1) LOOP
         PERFORM set_pv_num(pv_num[I]);
         RAISE NOTICE 'pv_num: %', pv_num[I];
         PERFORM test_knn(query,10);
     END LOOP;
+
+    PERFORM test_vector(query, probes, k);
+
+    PERFORM test_cube(query, k);
+
+    PERFORM test_bktree(query,thres,10);
+
 END
 $$
 LANGUAGE plpgsql;

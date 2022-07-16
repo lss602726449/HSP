@@ -16,8 +16,6 @@ SELECT set_m(3);
 
 SELECT create_index('test_hsp', 'val');
 
-SELECT * from test_hsp where hamming_distance('{189,37,240,18,159,201,172,87}',val)<=4;
-
 
 CREATE EXTENSION bktree;
 

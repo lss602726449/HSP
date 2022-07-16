@@ -214,8 +214,8 @@ BEGIN
         recall = recall/num/k;
         bktree_time = pre + bktree_time/num;
         pre = bktree_time;
-        RAISE NOTICE 'recall: %',recall;
         RAISE NOTICE 'bktree_time: %',bktree_time;
+        RAISE NOTICE 'recall: %',recall;
     END LOOP;
 END
 $$
@@ -289,9 +289,10 @@ BEGIN
         recall = recall/num/k;
         cube_time = cube_time/num;
         bf_time = bf_time/num;
-        RAISE NOTICE 'recall: %',recall;
-        RAISE NOTICE 'cube_time: %',cube_time;
         RAISE NOTICE 'bf_time: %',bf_time;
+        RAISE NOTICE 'cube_time: %',cube_time;
+        RAISE NOTICE 'recall: %',recall;
+        
 END
 $$
 LANGUAGE plpgsql;
@@ -365,9 +366,10 @@ BEGIN
             recall = recall/num/k;
             vector_time = vector_time/num;
             bf_time = bf_time/num;
-            RAISE NOTICE 'recall: %',recall;
-            RAISE NOTICE 'vector_time: %',vector_time;
             RAISE NOTICE 'bf_time: %',bf_time;
+            RAISE NOTICE 'vector_time: %',vector_time;
+            RAISE NOTICE 'recall: %',recall;
+            
     END LOOP;
 END
 $$

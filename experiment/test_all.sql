@@ -1,63 +1,3 @@
-CREATE EXTENSION hsp;
-CREATE EXTENSION hstore;
-
-CREATE TABLE test_hsp(id SERIAL PRIMARY KEY, val hmcode);
-
-CREATE OR REPLACE FUNCTION gen_uint8_arr(int) RETURNS int[] as $$  
-    SELECT array_agg((random()*255)::int4) from generate_series(1,$1);  
-$$ LANGUAGE SQL STRICT ;  
-
-INSERT INTO test_hsp(val) SELECT gen_uint8_arr(8) FROM generate_series(1,1000000);
-
-SELECT set_m(3);
-
-SELECT create_index('test_hsp', 'val');
-
-SELECT set_pv_num(1000);
-
--- test for correctness
-
--- SELECT foo.id,foo.arr[2] from (SELECT id, hmcode_split(val,8) as arr FROM test_gph)as foo;
-
--- SELECT hmcode_split(ARRAY[1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0],8);
-
--- SELECT UNNEST(get_query_cand(513,8,0));
-
--- SELECT UNNEST(get_query_cand(513,8,1));
-
--- SELECT hi.id 
--- FROM hm_index1 as hi, (SELECT UNNEST(get_query_cand(513,8,0))as q) as foo 
--- WHERE hi.code = foo.q;
-
--- SELECT hi.id 
--- FROM hm_index1 as hi, (SELECT UNNEST(get_query_cand(513,8,1))as q) as foo 
--- WHERE hi.code = foo.q;
-
--- EXPLAIN ANALYZE SELECT hi.id 
--- FROM hm_index1 as hi, (SELECT UNNEST(get_query_cand(513,8,1))as q) as foo 
--- WHERE hi.code = foo.q;
-
-SELECT gen_uint8_arr(8)::hmcode as q into query;
-
-SELECT * FROM query;
-
-\timing ON 
-
-CREATE TABLE gt AS SELECT id, hamming_distance(val, query.q) AS dis from test_hsp , query ORDER BY dis LIMIT 10 ;
-
-CREATE TABLE test AS SELECT temp.* , hamming_distance(val, query.q) AS dis  from query, search_knn(query.q, NULL::test_hsp, 'val', 10) as temp ;
-
-SELECT * from (SELECT gen_uint8_arr(8)::hmcode as q) as query, search_knn(query.q, NULL::test_hsp, 'val', 10); 
-
-SELECT * from test_hsp, (SELECT gen_uint8_arr(8)::hmcode as q) query ORDER BY hamming_distance(val, query.q) LIMIT 10;
-
-SELECT id, hamming_distance(val, '{12,47,195,146,74,59,9,97}') AS dis from test_hsp ORDER BY dis LIMIT 10 ;
-
-SELECT *, hamming_distance(val, '{12,47,195,146,74,59,9,97}') AS dis  from search_knn('{12,47,195,146,74,59,9,97}', NULL::test_hsp, 'val', 10) ORDER BY dis; 
-
-SELECT *, hamming_distance(val, '{12,47,195,146,74,59,9,97}') AS dis  from search_knn_mih('{12,47,195,146,74,59,9,97}', NULL::test_hsp, 'val', 10) ORDER BY dis; 
-
-
 CREATE EXTENSION bktree;
 
 CREATE TABLE  test_bktree(id SERIAL PRIMARY KEY, val bigint);
@@ -80,6 +20,110 @@ INSERT INTO test_bktree select id, gen_64(val::int[]) from test_hsp;
 
 CREATE INDEX bk_index_name ON test_bktree USING spgist (val bktree_ops);
 
+
+CREATE OR REPLACE FUNCTION test(num int, r int) RETURNS void as $$  
+DECLARE
+start_time timestamp;
+end_time timestamp;
+bf_time interval;
+thres_time interval;
+mih_time interval;
+bktree_time interval;
+query hmcode;
+divide float;
+temp bigint;
+rand integer;
+BEGIN
+    bf_time = '0 second';
+    thres_time = '0 second';
+    bktree_time = '0 second';
+	mih_time = '0 second';
+    -- RAISE NOTICE 'bf_time: %',bf_time;
+    -- RAISE NOTICE 'thres_time: %',thres_time;
+    start_time = clock_timestamp(); 
+    EXECUTE format('SELECT * from test_hsp where hamming_distance(val, $1) < $2 ')using '{93,67,144,178,39,208,103,247}'::hmcode, r ;
+    end_time = clock_timestamp();
+    bf_time = bf_time + age(end_time,start_time);
+    FOR I IN 1..num LOOP
+		rand = random()*1000000;
+        EXECUTE format('SELECT val from test_hsp WHERE id = $1 ')using rand into query;
+
+		start_time = clock_timestamp();
+        EXECUTE format('SELECT * from search_thres_mih($1, NULL::test_hsp, $2, $3)') using query, 'val', r;
+        end_time = clock_timestamp();
+        mih_time = mih_time + age(end_time,start_time);
+
+        start_time = clock_timestamp();
+        EXECUTE format('SELECT * from search_thres($1, NULL::test_hsp, $2, $3)') using query, 'val', r;
+        end_time = clock_timestamp();
+        thres_time = thres_time + age(end_time,start_time);
+
+        EXECUTE format('SELECT val from test_bktree WHERE id = $1 ')using rand into temp;
+        start_time = clock_timestamp();
+        EXECUTE format('SELECT * FROM test_bktree WHERE val <@ ($1, $2);') using temp,r;
+        end_time = clock_timestamp();
+        bktree_time = bktree_time + age(end_time,start_time);
+    END LOOP;  
+    divide = num;
+    bf_time = bf_time;
+    thres_time = thres_time/divide;
+	mih_time = mih_time/divide;
+    bktree_time = bktree_time/divide;
+    RAISE NOTICE 'bf_time: %',bf_time;
+    RAISE NOTICE 'thres_time: %',thres_time;
+	RAISE NOTICE 'mih_time: %',mih_time;
+    RAISE NOTICE 'bktree_time: %',bktree_time;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION test() RETURNS void as $$  
+DECLARE
+    thres  int[] := '{0,1,2,3,4,5,6,7,8}';
+BEGIN
+    FOR I IN 1..array_upper(thres, 1) LOOP
+        RAISE NOTICE 'r: %', thres[I];
+        PERFORM test(1000,I);
+    END LOOP; 
+END
+$$
+LANGUAGE plpgsql;
+
+select test();
+
+CREATE OR REPLACE FUNCTION gen_bit(nums int[]) RETURNS text as $$  
+  select string_agg(foo.unnest::BIT(8)::text,'') from (select unnest(nums)) foo;
+$$
+LANGUAGE sql strict; 
+
+CREATE OR REPLACE FUNCTION add_delim(arr text) RETURNS text as $$  
+  select string_agg(foo.unnest,',') from (select unnest(regexp_split_to_array(arr,''))) foo;
+$$
+LANGUAGE sql strict; 
+
+create extension cube;  
+
+create table test_cube (  
+  id int primary key,   -- 主键 
+  val text    
+);  
+
+insert into test_cube select id, '('||add_delim(val)||')' from  
+(select id, gen_bit(val::int[]) val
+from test_hsp) foo;
+
+create index idx_test_cube on test_cube using gist((val::cube)); 
+
+create extension vector;
+
+CREATE TABLE test_vector (id int, val vector(64));
+
+INSERT INTO test_vector SELECT id, ('['||add_delim(gen_bit(val::int[]))||']')::vector(64)
+from test_hsp; 
+
+CREATE INDEX ON test_vector USING ivfflat (val vector_l2_ops) WITH (lists = 1000);
+
+SET max_parallel_workers_per_gather = 1;
 
 CREATE OR REPLACE FUNCTION test_knn(query_arr int[], k int) RETURNS void as $$  
 DECLARE
@@ -405,31 +449,5 @@ END
 $$
 LANGUAGE plpgsql;
 
--- \timing OFF
 
-SELECT count(*) FROM
-test 
-WHERE test.dis < (SELECT max(dis) from gt);
-
-SELECT CASE WHEN foo1.count>foo2.count THEN foo2.count
-            ELSE foo1.count
-       END
-FROM
-(SELECT count(*) FROM
-test 
-WHERE test.dis = (SELECT max(dis) from gt)) as foo1,
-(SELECT count(*) FROM gt 
-WHERE gt.dis = (SELECT max(dis) from gt)) as foo2;
-
-
--- SELECT drop_index('test_gph', 'val');
-
--- DROP TABLE test_gph;
-
--- DROP TABLE query;
-
--- DROP TABLE test;
-
--- DROP TABLE gt;
-
--- DROP EXTENSION gph CASCADE; 
+select test();

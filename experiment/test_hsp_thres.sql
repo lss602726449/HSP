@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION gen_uint8_arr(int) RETURNS int[] as $$
     SELECT array_agg((random()*255)::int4) from generate_series(1,$1);  
 $$ LANGUAGE SQL STRICT ;  
 
--- INSERT INTO test_hsp(val) SELECT gen_uint8_arr(8) FROM generate_series(1,1000000);
+INSERT INTO test_hsp(val) SELECT gen_uint8_arr(8) FROM generate_series(1,10000000);
 
 SELECT set_m(3);
 
@@ -115,7 +115,7 @@ DECLARE
 BEGIN
     FOR I IN 1..array_upper(thres, 1) LOOP
         RAISE NOTICE 'r: %', thres[I];
-        PERFORM test(500,I);
+        PERFORM test(1000,I);
     END LOOP; 
 END
 $$

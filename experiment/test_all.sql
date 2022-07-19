@@ -1,3 +1,12 @@
+CREATE EXTENSION hsp;
+CREATE EXTENSION hstore;
+
+\i sift1m_64.sql
+
+SELECT set_m(3);
+
+SELECT create_index('test_hsp','val');
+
 CREATE EXTENSION bktree;
 
 CREATE TABLE  test_bktree(id SERIAL PRIMARY KEY, val bigint);
@@ -21,6 +30,43 @@ INSERT INTO test_bktree select id, gen_64(val::int[]) from test_hsp;
 CREATE INDEX bk_index_name ON test_bktree USING spgist (val bktree_ops);
 
 
+CREATE OR REPLACE FUNCTION gen_bit(nums int[]) RETURNS text as $$  
+  select string_agg(foo.unnest::BIT(8)::text,'') from (select unnest(nums)) foo;
+$$
+LANGUAGE sql strict; 
+
+CREATE OR REPLACE FUNCTION gen_arr(t text, part int) RETURNS text[] as $$  
+DECLARE
+ans text[];
+n integer;
+BEGIN
+  n = length(t)/part;
+  FOR I in 1..n LOOP
+    ans[I] = substr(t,(I-1)*part+1, part);
+  END LOOP;
+RETURN ans;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE EXTENSION smlar;
+
+CREATE TABLE test_smlar_4 (id INT, hmval BIT(64), hmarr TEXT[]);
+
+INSERT INTO test_smlar_4 (id, hmval, hmarr)
+SELECT id, gen_bit(val::int[])::bit(64), gen_arr(gen_bit(val::int[]),16)
+from test_hsp;
+
+CREATE INDEX idx_hmarr_test_4 ON test_smlar_4 USING GIN(hmarr _text_sml_ops );
+
+CREATE TABLE test_smlar_8 (id INT, hmval BIT(64), hmarr TEXT[]);
+
+INSERT INTO test_smlar_8 (id, hmval, hmarr)
+SELECT id, gen_bit(val::int[])::bit(64), gen_arr(gen_bit(val::int[]),8)
+from test_hsp;
+
+CREATE INDEX idx_hmarr_test_8 ON test_smlar_8 USING GIN(hmarr _text_sml_ops );
+
 CREATE OR REPLACE FUNCTION test(num int, r int) RETURNS void as $$  
 DECLARE
 start_time timestamp;
@@ -29,21 +75,30 @@ bf_time interval;
 thres_time interval;
 mih_time interval;
 bktree_time interval;
+smlar_4_time interval;
+smlar_8_time interval;
 query hmcode;
 divide float;
 temp bigint;
 rand integer;
+smlar_4_query text;
+smlar_8_query text;
+smlar_4_arr text[];
+smlar_8_arr text[];
 BEGIN
     bf_time = '0 second';
     thres_time = '0 second';
     bktree_time = '0 second';
 	mih_time = '0 second';
+    smlar_4_time = '0 second';
+    smlar_8_time = '0 second';
     -- RAISE NOTICE 'bf_time: %',bf_time;
     -- RAISE NOTICE 'thres_time: %',thres_time;
     start_time = clock_timestamp(); 
     EXECUTE format('SELECT * from test_hsp where hamming_distance(val, $1) < $2 ')using '{93,67,144,178,39,208,103,247}'::hmcode, r ;
     end_time = clock_timestamp();
     bf_time = bf_time + age(end_time,start_time);
+    -- RAISE NOTICE '%',1.0/(1+r);
     FOR I IN 1..num LOOP
 		rand = random()*1000000;
         EXECUTE format('SELECT val from test_hsp WHERE id = $1 ')using rand into query;
@@ -63,6 +118,31 @@ BEGIN
         EXECUTE format('SELECT * FROM test_bktree WHERE val <@ ($1, $2);') using temp,r;
         end_time = clock_timestamp();
         bktree_time = bktree_time + age(end_time,start_time);
+
+        IF r<4 THEN
+            EXECUTE format('set smlar.threshold = %s;', 1.0-1.0/4*r);
+            EXECUTE format('SELECT hmval from test_smlar_4 WHERE id = $1 ')using rand into smlar_4_query;
+            EXECUTE format('SELECT hmarr from test_smlar_4 WHERE id = $1 ')using rand into smlar_4_arr;
+            start_time = clock_timestamp();
+            EXECUTE format('SELECT id FROM test_smlar_4
+            WHERE hmarr %% $1
+            AND LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) <= $3') using smlar_4_arr,smlar_4_query,r,'0','';
+            end_time = clock_timestamp();
+            smlar_4_time = smlar_4_time + age(end_time,start_time);
+        END IF;
+
+        IF r<8 THEN
+            EXECUTE format('set smlar.threshold = %s;', 1.0-1.0/8*r);
+            EXECUTE format('SELECT hmval from test_smlar_8 WHERE id = $1 ')using rand into smlar_8_query;
+            EXECUTE format('SELECT hmarr from test_smlar_8 WHERE id = $1 ')using rand into smlar_8_arr;
+            start_time = clock_timestamp();
+            EXECUTE format('SELECT id FROM test_smlar_8
+            WHERE hmarr %% $1
+            AND LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) <= $3') using smlar_8_arr,smlar_8_query,r,'0','';
+            end_time = clock_timestamp();
+            smlar_8_time = smlar_8_time + age(end_time,start_time);
+        END IF;
+        
     END LOOP;  
     divide = num;
     bf_time = bf_time;
@@ -73,6 +153,12 @@ BEGIN
     RAISE NOTICE 'thres_time: %',thres_time;
 	RAISE NOTICE 'mih_time: %',mih_time;
     RAISE NOTICE 'bktree_time: %',bktree_time;
+    IF r<4 THEN
+        RAISE NOTICE 'smlar_4_time: %',smlar_4_time/divide;
+    END IF;
+    IF r<8 THEN
+        RAISE NOTICE 'smlar_8_time: %',smlar_8_time/divide;
+    END IF;
 END
 $$
 LANGUAGE plpgsql;
@@ -83,7 +169,7 @@ DECLARE
 BEGIN
     FOR I IN 1..array_upper(thres, 1) LOOP
         RAISE NOTICE 'r: %', thres[I];
-        PERFORM test(1000,I);
+        PERFORM test(10,thres[I]);
     END LOOP; 
 END
 $$
@@ -419,6 +505,170 @@ END
 $$
 LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION test_smlar4(query_arr int[], k int) RETURNS void as $$
+DECLARE
+start_time timestamp;
+end_time timestamp;
+recall float;
+smlar_4_time interval;
+bf_time interval;
+smlar_4_query text;
+smlar_4_arr text[];
+query hmcode;
+num integer;
+temp integer;
+BEGIN
+    num = array_upper(query_arr,1);
+    FOR I IN 0..3 LOOP
+        recall = 0;
+        smlar_4_time = '0 second';
+        bf_time = '0 second';
+        -- RAISE NOTICE '%', probes[I];
+        EXECUTE format('set smlar.threshold = %s;', 1.0-1.0/4*I);
+        -- RAISE NOTICE '%', probes[I];
+        FOR J IN 1..array_upper(query_arr, 1) LOOP
+            
+            EXECUTE format('SELECT val from test_hsp WHERE id = $1 ')using query_arr[J] into query;
+            EXECUTE format('SELECT hmval from test_smlar_4 WHERE id = $1 ')using query_arr[J] into smlar_4_query;
+            EXECUTE format('SELECT hmarr from test_smlar_4 WHERE id = $1 ')using query_arr[J] into smlar_4_arr;
+            
+            start_time = clock_timestamp();
+            EXECUTE format('SELECT id, LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) dis  FROM test_smlar_4
+            WHERE hmarr %% $1
+            order by dis limit $3') using smlar_4_arr,smlar_4_query,k,'0','';
+            end_time = clock_timestamp();
+            smlar_4_time = smlar_4_time + age(end_time,start_time);
+
+            EXECUTE format('CREATE TEMP TABLE test AS SELECT id, LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) dis  FROM test_smlar_4
+            WHERE hmarr %% $1
+            order by dis limit $3') using smlar_4_arr,smlar_4_query,k,'0','';
+
+            start_time = clock_timestamp(); 
+            EXECUTE format('SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
+            end_time = clock_timestamp();
+            bf_time = bf_time + age(end_time,start_time);
+
+            EXECUTE format('CREATE TEMP TABLE gt AS SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
+
+
+            SELECT count(*) 
+            FROM test 
+            WHERE test.dis < (SELECT max(dis) from gt) INTO temp;
+            recall = recall + temp;
+            SELECT  CASE WHEN foo1.count>foo2.count THEN foo2.count
+                        ELSE foo1.count
+                    END
+            FROM
+            (SELECT count(*) 
+            FROM test 
+            WHERE test.dis = (SELECT max(dis) from gt)) as foo1,
+            (SELECT count(*) 
+            FROM gt 
+            WHERE gt.dis = (SELECT max(dis) from gt)) as foo2 INTO temp;
+            recall = recall + temp;
+
+            drop table test;
+            drop table gt;
+            
+        END LOOP;
+            -- RAISE NOTICE 'recall %',recall;
+            -- RAISE NOTICE 'num %',num;
+            -- RAISE NOTICE 'k %',k;
+            RAISE NOTICE 'thres: %', 1.0-1.0/4*I;
+            recall = recall/num/k;
+            smlar_4_time = smlar_4_time/num;
+            bf_time = bf_time/num;
+            RAISE NOTICE 'bf_time: %',bf_time;
+            RAISE NOTICE 'smlar_4_time: %',smlar_4_time;
+            RAISE NOTICE 'recall: %',recall;
+            
+    END LOOP;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION test_smlar8(query_arr int[], k int) RETURNS void as $$
+DECLARE
+start_time timestamp;
+end_time timestamp;
+recall float;
+smlar_8_time interval;
+bf_time interval;
+smlar_8_query text;
+smlar_8_arr text[];
+query hmcode;
+num integer;
+temp integer;
+BEGIN
+    num = array_upper(query_arr,1);
+    FOR I IN 0..7 LOOP
+        recall = 0;
+        smlar_8_time = '0 second';
+        bf_time = '0 second';
+        -- RAISE NOTICE '%', probes[I];
+        EXECUTE format('set smlar.threshold = %s;', 1.0-1.0/8*I);
+        -- RAISE NOTICE '%', probes[I];
+        FOR J IN 1..array_upper(query_arr, 1) LOOP
+            
+            EXECUTE format('SELECT val from test_hsp WHERE id = $1 ')using query_arr[J] into query;
+            EXECUTE format('SELECT hmval from test_smlar_8 WHERE id = $1 ')using query_arr[J] into smlar_8_query;
+            EXECUTE format('SELECT hmarr from test_smlar_8 WHERE id = $1 ')using query_arr[J] into smlar_8_arr;
+            
+            start_time = clock_timestamp();
+            EXECUTE format('SELECT id, LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) dis  FROM test_smlar_8
+            WHERE hmarr %% $1
+            order by dis limit $3') using smlar_8_arr,smlar_8_query,k,'0','';
+            end_time = clock_timestamp();
+            smlar_8_time = smlar_8_time + age(end_time,start_time);
+
+            EXECUTE format('CREATE TEMP TABLE test AS SELECT id, LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) dis  FROM test_smlar_8
+            WHERE hmarr %% $1
+            order by dis limit $3') using smlar_8_arr,smlar_8_query,k,'0','';
+
+            start_time = clock_timestamp(); 
+            EXECUTE format('SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
+            end_time = clock_timestamp();
+            bf_time = bf_time + age(end_time,start_time);
+
+            EXECUTE format('CREATE TEMP TABLE gt AS SELECT id, hamming_distance(val, $2) AS dis from test_hsp ORDER BY dis LIMIT $1')using k,query ;
+
+
+            SELECT count(*) 
+            FROM test 
+            WHERE test.dis < (SELECT max(dis) from gt) INTO temp;
+            recall = recall + temp;
+            SELECT  CASE WHEN foo1.count>foo2.count THEN foo2.count
+                        ELSE foo1.count
+                    END
+            FROM
+            (SELECT count(*) 
+            FROM test 
+            WHERE test.dis = (SELECT max(dis) from gt)) as foo1,
+            (SELECT count(*) 
+            FROM gt 
+            WHERE gt.dis = (SELECT max(dis) from gt)) as foo2 INTO temp;
+            recall = recall + temp;
+
+            drop table test;
+            drop table gt;
+            
+        END LOOP;
+            -- RAISE NOTICE 'recall %',recall;
+            -- RAISE NOTICE 'num %',num;
+            -- RAISE NOTICE 'k %',k;
+            RAISE NOTICE 'thres: %', 1.0-1.0/8*I;
+            recall = recall/num/k;
+            smlar_8_time = smlar_8_time/num;
+            bf_time = bf_time/num;
+            RAISE NOTICE 'bf_time: %',bf_time;
+            RAISE NOTICE 'smlar_8_time: %',smlar_8_time;
+            RAISE NOTICE 'recall: %',recall;
+            
+    END LOOP;
+END
+$$
+LANGUAGE plpgsql;
+
 
 CREATE OR REPLACE FUNCTION test() RETURNS void as $$  
 DECLARE
@@ -429,9 +679,12 @@ DECLARE
     num int;
     k int;
 BEGIN
-    num = 1000;
+    num = 10;
     k = 10;
     SELECT array_agg((random()*1000000)::int4) from generate_series(1,num) into query;
+
+    PERFORM test_smlar8(query,k);
+    PERFORM test_smlar4(query,k);
 
     FOR I IN 1..array_upper(pv_num, 1) LOOP
         PERFORM set_pv_num(pv_num[I]);
@@ -448,6 +701,5 @@ BEGIN
 END
 $$
 LANGUAGE plpgsql;
-
 
 select test();

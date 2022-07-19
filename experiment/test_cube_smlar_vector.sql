@@ -138,7 +138,9 @@ order by dis
 limit 10;
 
 
-INSERT INTO TEST (id, hmval, hmarr)
+CREATE TABLE test_smlar (id INT, hmval BIT(64), hmarr TEXT[]);
+
+INSERT INTO test_smlar (id, hmval, hmarr)
 SELECT id,
 val::bit(64),
 regexp_split_to_array('1_' || substring(val, 1, 16) || ',2_' ||
@@ -151,24 +153,23 @@ FROM generate_series(1, 1000000) t(id)) t;
 
 
 --查询海明距离小于3的数据，不切分，不建索引需要近3秒
-SELECT * FROM test WHERE LENGTH(REPLACE(BITXOR(BIT'0110010110010001111010100101000000110010111100110110110110100111', hmval)::TEXT,'0','')) < 3;
+SELECT * FROM test_smlar WHERE LENGTH(REPLACE(BITXOR(BIT'0110010110010001111010100101000000110010111100110110110110100111', hmval)::TEXT,'0','')) < 3;
 
 
-CREATE INDEX idx_hmarr_test ON test USING GIN(hmarr _text_sml_ops );
+CREATE INDEX idx_hmarr_test ON test_smlar USING GIN(hmarr _text_sml_ops );
 
 
 --设置smlar参数，查询至少需要2个切分的块一样
 set smlar.type = overlap;
 
-set smlar.threshold = 0.5;
+set smlar.threshold = 0.25;
 
-
+smlar( hmarr, '{1_0010111100011111,2_1011000101000100,3_0111001010010001,4_0100010001001101}')
 --通过切分，使用数组相似性加持索引，收敛数据，查询不到1毫秒
-SELECT *,
-smlar( hmarr, '{1_1101101011001111,2_0011101110111110,3_0100001110000101,4_1000000111010101}')
-FROM test
-WHERE hmarr % '{1_1101101011001111,2_0011101110111110,3_0100001110000101,4_1000000111010101}'
-AND LENGTH(REPLACE(BITXOR(BIT'1101101011001111001110111011111001000011100001011000000111010101', hmval)::TEXT, '0', '')) < 3; 
+SELECT id
+FROM test_smlar_4
+WHERE hmarr % '{1_0010111100011111,2_1011000101000100,3_0111001010010001,4_0100010001001101}'
+AND LENGTH(REPLACE(BITXOR(BIT'0010111100011111101100010100010001110010100100010100010001001101', hmval)::TEXT, '0', '')) < 3; 
 
 --执行计划
 set smlar.threshold = 0.1;
@@ -184,4 +185,26 @@ select
 
 
 
+CREATE TABLE test_smlar_8 (id INT, hmval BIT(64), hmarr TEXT[]);
 
+INSERT INTO test_smlar_8 (id, hmval, hmarr)
+SELECT id,
+val::bit(64),
+regexp_split_to_array('1_' || substring(val, 1, 8) 
+|| ',2_' ||substring(val, 9, 8) 
+|| ',3_' ||substring(val, 17, 8) 
+|| ',4_' ||substring(val, 25, 8)
+|| ',5_' ||substring(val, 33, 8)
+|| ',6_' ||substring(val, 41, 8)
+|| ',7_' ||substring(val, 49, 8)
+|| ',8_' ||substring(val, 57, 8)
+, ',')
+FROM (SELECT id,
+(sqrt(random())::NUMERIC * 9223372036854775807 * 2 - 9223372036854775807::NUMERIC)::int8::bit(64)::text AS val
+FROM generate_series(1, 1000000) t(id)) t;
+
+CREATE INDEX idx_hmarr_test_8 ON test_smlar_8 USING GIN(hmarr _text_sml_ops );
+
+SELECT id
+FROM test_smlar_8
+WHERE hmarr % '{1_00000101,2_01111011,3_10001010,4_01110100,5_00100000,6_11110011,7_01111001,8_11110011}'

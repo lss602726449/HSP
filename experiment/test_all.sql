@@ -3,6 +3,8 @@ CREATE EXTENSION hstore;
 
 \i sift1m_64.sql
 
+SELECT pg_catalog.set_config('search_path', '"$user",public',false);
+
 SELECT set_m(3);
 
 SELECT create_index('test_hsp','val');
@@ -672,7 +674,7 @@ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION test() RETURNS void as $$  
 DECLARE
-    pv_num float[] := '{10, 50, 100, 200, 500, 1000, 2000, 3000, 5000}';
+    pv_num float[] := '{10, 50, 100, 200, 500, 1000, 2000, 3000, 5000, 10000}';
     thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10}';
     probes  int[] := '{1,5,10,20,50,100,200}';
     query int[];
@@ -683,14 +685,15 @@ BEGIN
     k = 10;
     SELECT array_agg((random()*1000000)::int4) from generate_series(1,num) into query;
 
-    PERFORM test_smlar8(query,k);
-    PERFORM test_smlar4(query,k);
 
     FOR I IN 1..array_upper(pv_num, 1) LOOP
         PERFORM set_pv_num(pv_num[I]);
         RAISE NOTICE 'pv_num: %', pv_num[I];
         PERFORM test_knn(query,10);
     END LOOP;
+
+    PERFORM test_smlar4(query,k);
+    PERFORM test_smlar8(query,k);
 
     PERFORM test_vector(query, probes, k);
 

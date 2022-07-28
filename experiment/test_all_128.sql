@@ -5,6 +5,8 @@ CREATE EXTENSION hstore;
 
 SELECT pg_catalog.set_config('search_path', '"$user",public',false);
 
+SET client_min_messages = notice;
+
 SELECT set_m(5);
 
 SELECT create_index('test_hsp','val');
@@ -167,11 +169,11 @@ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION test() RETURNS void as $$  
 DECLARE
-    thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}';
+    thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10,11,12}';
 BEGIN
     FOR I IN 1..array_upper(thres, 1) LOOP
         RAISE NOTICE 'r: %', thres[I];
-        PERFORM test(10,thres[I]);
+        PERFORM test(100,thres[I]);
     END LOOP; 
 END
 $$
@@ -674,14 +676,14 @@ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION test() RETURNS void as $$  
 DECLARE
-    pv_num float[] := '{10, 50, 100, 200, 500, 1000, 2000, 3000, 5000, 10000}';
-    thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}';
+    pv_num float[] := '{10, 50, 100, 200, 500, 1000, 2000, 3000, 5000, 10000, 15000, 20000}';
+    thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10,11,12}';
     probes  int[] := '{1,5,10,20,50,100,200}';
     query int[];
     num int;
     k int;
 BEGIN
-    num = 10;
+    num = 100;
     k = 10;
     SELECT array_agg((random()*1000000)::int4) from generate_series(1,num) into query;
 

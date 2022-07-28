@@ -44,9 +44,9 @@ SELECT * FROM test_bktree WHERE val <@ (0, 10);
 
 SELECT * FROM test_bktree WHERE val <@ (6814781905043772971, 4);
 
-SELECT * from search_thres('{12,47,195,146,74,59,9,97}', NULL::test_hsp, 'val',10);
+SELECT * from search_thres('{53,16,48,0,0,0,0,0,0,0,0,224,9,19,5,33}', NULL::test_hsp, 'val',10);
 
-SELECT * from test_hsp where hamming_distance('{12,47,195,146,74,59,9,97}', val)<=10;
+SELECT * from test_hsp where hamming_distance('{93,67,144,178,39,208,103,247}', val)<=8;
 
 
 SELECT *

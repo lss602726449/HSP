@@ -10,6 +10,8 @@
         "array": "c",
         "string_view": "c",
         "algorithm": "c",
-        "limits": "c"
+        "limits": "c",
+        "iostream": "cpp",
+        "ostream": "cpp"
     }
 }

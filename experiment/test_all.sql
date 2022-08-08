@@ -123,29 +123,29 @@ BEGIN
         end_time = clock_timestamp();
         bktree_time = bktree_time + age(end_time,start_time);
 
-        IF r<4 THEN
-            EXECUTE format('set smlar.threshold = %s;', 1.0-1.0/4*r);
-            EXECUTE format('SELECT hmval from test_smlar_4 WHERE id = $1 ')using rand into smlar_4_query;
-            EXECUTE format('SELECT hmarr from test_smlar_4 WHERE id = $1 ')using rand into smlar_4_arr;
-            start_time = clock_timestamp();
-            EXECUTE format('SELECT id FROM test_smlar_4
-            WHERE hmarr %% $1
-            AND LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) <= $3') using smlar_4_arr,smlar_4_query,r,'0','';
-            end_time = clock_timestamp();
-            smlar_4_time = smlar_4_time + age(end_time,start_time);
-        END IF;
+        -- IF r<4 THEN
+        --     EXECUTE format('set smlar.threshold = %s;', 1.0-1.0/4*r);
+        --     EXECUTE format('SELECT hmval from test_smlar_4 WHERE id = $1 ')using rand into smlar_4_query;
+        --     EXECUTE format('SELECT hmarr from test_smlar_4 WHERE id = $1 ')using rand into smlar_4_arr;
+        --     start_time = clock_timestamp();
+        --     EXECUTE format('SELECT id FROM test_smlar_4
+        --     WHERE hmarr %% $1
+        --     AND LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) <= $3') using smlar_4_arr,smlar_4_query,r,'0','';
+        --     end_time = clock_timestamp();
+        --     smlar_4_time = smlar_4_time + age(end_time,start_time);
+        -- END IF;
 
-        IF r<8 THEN
-            EXECUTE format('set smlar.threshold = %s;', 1.0-1.0/8*r);
-            EXECUTE format('SELECT hmval from test_smlar_8 WHERE id = $1 ')using rand into smlar_8_query;
-            EXECUTE format('SELECT hmarr from test_smlar_8 WHERE id = $1 ')using rand into smlar_8_arr;
-            start_time = clock_timestamp();
-            EXECUTE format('SELECT id FROM test_smlar_8
-            WHERE hmarr %% $1
-            AND LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) <= $3') using smlar_8_arr,smlar_8_query,r,'0','';
-            end_time = clock_timestamp();
-            smlar_8_time = smlar_8_time + age(end_time,start_time);
-        END IF;
+        -- IF r<8 THEN
+        --     EXECUTE format('set smlar.threshold = %s;', 1.0-1.0/8*r);
+        --     EXECUTE format('SELECT hmval from test_smlar_8 WHERE id = $1 ')using rand into smlar_8_query;
+        --     EXECUTE format('SELECT hmarr from test_smlar_8 WHERE id = $1 ')using rand into smlar_8_arr;
+        --     start_time = clock_timestamp();
+        --     EXECUTE format('SELECT id FROM test_smlar_8
+        --     WHERE hmarr %% $1
+        --     AND LENGTH(REPLACE(BITXOR($2::bit(64), hmval)::TEXT, $4, $5)) <= $3') using smlar_8_arr,smlar_8_query,r,'0','';
+        --     end_time = clock_timestamp();
+        --     smlar_8_time = smlar_8_time + age(end_time,start_time);
+        -- END IF;
         
     END LOOP;  
     divide = num;
@@ -157,12 +157,12 @@ BEGIN
     RAISE NOTICE 'thres_time: %',thres_time;
 	RAISE NOTICE 'mih_time: %',mih_time;
     RAISE NOTICE 'bktree_time: %',bktree_time;
-    IF r<4 THEN
-        RAISE NOTICE 'smlar_4_time: %',smlar_4_time/divide;
-    END IF;
-    IF r<8 THEN
-        RAISE NOTICE 'smlar_8_time: %',smlar_8_time/divide;
-    END IF;
+    -- IF r<4 THEN
+    --     RAISE NOTICE 'smlar_4_time: %',smlar_4_time/divide;
+    -- END IF;
+    -- IF r<8 THEN
+    --     RAISE NOTICE 'smlar_8_time: %',smlar_8_time/divide;
+    -- END IF;
 END
 $$
 LANGUAGE plpgsql;
@@ -677,7 +677,7 @@ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION test() RETURNS void as $$  
 DECLARE
     pv_num float[] := '{10, 50, 100, 200, 500, 1000, 2000, 3000, 5000, 10000, 15000, 20000}';
-    thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10}';
+    thres  int[] := '{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}';
     probes  int[] := '{1,5,10,20,50,100,200}';
     query int[];
     num int;
@@ -688,18 +688,18 @@ BEGIN
     SELECT array_agg((random()*1000000)::int4) from generate_series(1,num) into query;
 
 
-    FOR I IN 1..array_upper(pv_num, 1) LOOP
-        PERFORM set_pv_num(pv_num[I]);
-        RAISE NOTICE 'pv_num: %', pv_num[I];
-        PERFORM test_knn(query,10);
-    END LOOP;
+    -- FOR I IN 1..array_upper(pv_num, 1) LOOP
+    --     PERFORM set_pv_num(pv_num[I]);
+    --     RAISE NOTICE 'pv_num: %', pv_num[I];
+    --     PERFORM test_knn(query,10);
+    -- END LOOP;
 
-    PERFORM test_smlar4(query,k);
-    PERFORM test_smlar8(query,k);
+    -- PERFORM test_smlar4(query,k);
+    -- PERFORM test_smlar8(query,k);
 
-    PERFORM test_vector(query, probes, k);
+    -- PERFORM test_vector(query, probes, k);
 
-    PERFORM test_cube(query[1:1], k);
+    -- PERFORM test_cube(query[1:1], k);
 
     PERFORM test_bktree(query,thres,10);
 

@@ -46,7 +46,7 @@ SELECT * FROM test_bktree WHERE val <@ (6814781905043772971, 4);
 
 SELECT * from search_thres('{53,16,48,0,0,0,0,0,0,0,0,224,9,19,5,33}', NULL::test_hsp, 'val',10);
 
-SELECT * from test_hsp where hamming_distance('{93,67,144,178,39,208,103,247}', val)<=8;
+SELECT * from test_hsp where hamming_distance('{93,67,144,178,39,208,103,247}', val)<=8; 
 
 
 SELECT *
@@ -360,6 +360,28 @@ BEGIN
 	FOR I IN 1 ..m LOOP
 		RAISE NOTICE '%', temp[I];
 	END LOOP;
+END
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION test() RETURNS void AS $$
+DECLARE
+res_temp integer[];
+arr1 integer[];
+arr2 integer[];
+BEGIN
+-- FOR i IN 1..4 LOOP
+-- 	EXECUTE format ('SELECT array_agg(hm_index%s.id) 
+-- 	FROM hm_index%s, (SELECT UNNEST(get_query_cand(0,32,1)) as q) as foo 
+-- 	WHERE code = q ',i,i)INTO res_temp;
+-- END LOOP;
+arr1[1] = 1;
+arr2[1] = 2;
+arr2[2] = 1;
+arr1 = ARRAY(DISTINCT UNNEST(array_cat(arr1,arr2)));
+FOR I IN array_lower(arr1, 1)..array_upper(arr1, 1) LOOP
+	RAISE NOTICE 'the th query = %',arr1[I];
+END LOOP;
 END
 $$
 LANGUAGE plpgsql;

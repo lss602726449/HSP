@@ -155,29 +155,6 @@ $$
 LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION test() RETURNS void AS $$
-DECLARE
-res_temp integer[];
-arr1 integer[];
-arr2 integer[];
-BEGIN
--- FOR i IN 1..4 LOOP
--- 	EXECUTE format ('SELECT array_agg(hm_index%s.id) 
--- 	FROM hm_index%s, (SELECT UNNEST(get_query_cand(0,32,1)) as q) as foo 
--- 	WHERE code = q ',i,i)INTO res_temp;
--- END LOOP;
-arr1[1] = 1;
-arr2[1] = 2;
-arr2[2] = 1;
-arr1 = ARRAY(DISTINCT UNNEST(array_cat(arr1,arr2)));
-FOR I IN array_lower(arr1, 1)..array_upper(arr1, 1) LOOP
-	RAISE NOTICE 'the th query = %',arr1[I];
-END LOOP;
-END
-$$
-LANGUAGE plpgsql;
-
-
 --trigger
 
 CREATE OR REPLACE FUNCTION create_trigger(tablename varchar, clomnname varchar) RETURNS void AS $$
@@ -227,7 +204,7 @@ SELECT get_m() INTO m;
 tablename = TG_ARGV[0];
 clomnname = TG_ARGV[1];
 id =  NEW.id;
-EXECUTE format('SELECT get_hmcode_dim(%s) from %s where id = 1',clomnname,tablename) INTO dim;
+EXECUTE format('SELECT get_hmcode_dim(%s) from %s limit 1',clomnname,tablename) INTO dim;
 -- RAISE NOTICE '%' ,hmcode_split(hmcode_in((hstore(NEW)->clomnname)::cstring, 0, dim), m);
 SELECT hmcode_split(hmcode_in((hstore(NEW)->clomnname)::cstring, 0, dim), m) INTO arr;
 FOR i IN 1..m LOOP
@@ -254,7 +231,7 @@ SELECT get_m() INTO m;
 tablename = TG_ARGV[0];
 clomnname = TG_ARGV[1];
 id =  NEW.id;
-EXECUTE format('SELECT get_hmcode_dim(%s) from %s where id = 1',clomnname,tablename) INTO dim;
+EXECUTE format('SELECT get_hmcode_dim(%s) from %s limit 1',clomnname,tablename) INTO dim;
 -- RAISE NOTICE '%' ,hmcode_split(hmcode_in((hstore(NEW)->clomnname)::cstring, 0, dim), m);
 SELECT hmcode_split(hmcode_in((hstore(NEW)->clomnname)::cstring, 0, dim), m) INTO arr;
 FOR i IN 1..m LOOP
@@ -295,7 +272,7 @@ statistics_array integer[];
 BEGIN
 
 SELECT get_m() INTO m;
-EXECUTE format('SELECT get_hmcode_dim(%s) from %s where id = 1',clomnname,tablename) INTO dim;
+EXECUTE format('SELECT get_hmcode_dim(%s) from %s limit 1',clomnname,tablename) INTO dim;
 SELECT ceil(dim::float4/m) INTO b;
 SELECT get_histgramrate() INTO histgramrate;
 
@@ -740,4 +717,4 @@ LANGUAGE plpgsql;
 -- default parameter 
 SELECT set_m(3);
 SELECT set_pv_num(1000);
-SELECT set_histgramrate(100);
+SELECT set_histgramrate(1000);

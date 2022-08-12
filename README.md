@@ -1,6 +1,6 @@
 # HSP
 
-HSP(Hamming simalirity search in postgres) is a extension which can support r-neighbor search  and knn(k-nearest neighbor) search in postgres for hamming vecotor.
+HSP(Hamming simalirity Search in Postgres) is a extension which can support r-neighbor search  and knn(k-nearest neighbor) search in postgres for hamming vecotor efficiently.
 
 ## Installation
 
@@ -47,7 +47,7 @@ SELECT * FROM test ORDER BY hamming_distance('{0,0,0,0,0,0,0,0}', val) limit 2; 
 
 For dataset size larger than 100 thousand, brute-force algorithm may suffer a high time overhead. Serveral algorithm have been proposed to solve the r-neighbor search problem and knn search problem. In this extension, We use the GPH algorithm to better solve the r-neighbor search in postgres, due to its efficiency. GPH algorithm obtains a more tight filting condition and enable flexible threshold allocation. It further uses dynamic programming algorithm to reduce the number of candidate sets. For knn search, multi-index (MIH) algorithm is modified to accelerate the search. For small datasets, it is not recommended to use index and similarity search algorithms.
 
-### Index building
+### Indexing
 
 Multiple hash tables are build as index shared by GPH and MIH. In order to make the dimension of each partition about 23, we set m = 3 for 64 dimension vector, and m=5 for  128. Trigger is also added in the UDF of *create_index* to keep the consistency of vector and index. (There must be at least one vector in the table)
 
@@ -73,9 +73,9 @@ SELECT set_pv_num(1000);
 SELECT *, hamming_distance(val, '{0,0,0,0,0,0,0,0}') AS dis  FROM search_knn_mih('{0,0,0,0,0,0,0,0}', NULL::test, 'val', 10);
 ```
 
-## Example with SIFT1M_64
+## Example With SIFT1M_64
 
-load the hamming vector dataset in *data*
+load the hamming vector dataset with a table named test_hsp in *data/sift1m.sql*
 
 ```shell
 createdb test

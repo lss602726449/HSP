@@ -642,7 +642,7 @@ mplus = dim - m * (b-1);
 -- RAISE NOTICE 'time of get dis = %',age(end_time, start_time);
 FOR I IN 1 ..m LOOP
 	IF I <= t%m  THEN
-		slots[I] = t/m+1;
+		slots[I] = t/m;
 	ELSE
 		slots[I] = t/m;
 	END IF;

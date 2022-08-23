@@ -61,7 +61,7 @@ SELECT create_index('test', 'val');
 *search_thres* takes query vector, tablename, clomnname, r as input, which searchs in table for all vectors hamming distance not greater than r. The result is exact.
 
 ```sql
-SELECT * FROM search_thres_('{0,0,0,0,0,0,0,0}', NULL::test, 'val', 2);
+SELECT * FROM search_thres('{0,0,0,0,0,0,0,0}', NULL::test, 'val', 2);
 ```
 
 ### KNN Search
@@ -88,7 +88,7 @@ Create index and execute search
 SELECT set_m(3);
 SELECT create_index('test_hsp', 'val');
 
-SELECT * FROM search_thres_('{0,0,0,0,0,0,0,0}', NULL::test_hsp, 'val', 2);
+SELECT * FROM search_thres('{0,0,0,0,0,0,0,0}', NULL::test_hsp, 'val', 2);
 SELECT set_pv_num(1000);
 SELECT *, hamming_distance(val, '{0,0,0,0,0,0,0,0}') AS dis  FROM search_knn_mih('{0,0,0,0,0,0,0,0}', NULL::test_hsp, 'val', 10);
 ```
